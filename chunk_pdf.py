@@ -20,14 +20,19 @@ def chunk_text(text, size, overlap):
     return chunks
 
 
-reader = PdfReader("sample-cost-estimate.pdf")
-all_chunks = []
-for number, page in enumerate(reader.pages, start=1):
-    text = clean(page.extract_text())
-    for piece in chunk_text(text, CHUNK_SIZE, OVERLAP):
-        all_chunks.append({"page": number, "text": piece})
+def load_chunks(path="sample-cost-estimate.pdf"):
+    reader = PdfReader(path)
+    all_chunks = []
+    for number, page in enumerate(reader.pages, start=1):
+        text = clean(page.extract_text())
+        for piece in chunk_text(text, CHUNK_SIZE, OVERLAP):
+            all_chunks.append({"page": number, "text": piece})
+    return all_chunks
 
-print("Total chunks:", len(all_chunks))
-for i, chunk in enumerate(all_chunks):
-    print(f"\n[{i}] page {chunk['page']} ({len(chunk['text'])} chars)")
-    print(chunk["text"])
+
+if __name__ == "__main__":
+    all_chunks = load_chunks()
+    print("Total chunks:", len(all_chunks))
+    for i, chunk in enumerate(all_chunks):
+        print(f"\n[{i}] page {chunk['page']} ({len(chunk['text'])} chars)")
+        print(chunk["text"])

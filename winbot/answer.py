@@ -1,13 +1,15 @@
-import sys
+import argparse
 
 from winbot import config
 from winbot.llm import generate
 from winbot.store import retrieve
 
 
-def answer(question):
+def answer(question, doc_id=None):
     matches = [
-        m for m in retrieve(question) if m["similarity"] >= config.SIMILARITY_THRESHOLD
+        m
+        for m in retrieve(question, doc_id=doc_id)
+        if m["similarity"] >= config.SIMILARITY_THRESHOLD
     ]
     if not matches:
         return {"answer": config.NOT_FOUND, "pages": [], "provider": "none"}
@@ -25,8 +27,13 @@ def answer(question):
 
 
 def main():
-    question = " ".join(sys.argv[1:]) or "Which service costs the most?"
-    result = answer(question)
+    parser = argparse.ArgumentParser(description="Ask a question about a document.")
+    parser.add_argument("question", nargs="*", help="the question to ask")
+    parser.add_argument("--doc", help="only search this document ID")
+    args = parser.parse_args()
+
+    question = " ".join(args.question) or "Which service costs the most?"
+    result = answer(question, doc_id=args.doc)
     print("Question:", question)
     print("Answer:", result["answer"])
     if result["pages"]:

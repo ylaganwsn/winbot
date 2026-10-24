@@ -32,7 +32,8 @@ def store_chunks(doc_id, chunks):
     return len(vectors)
 
 
-def retrieve(question, top_k=config.TOP_K, fetch_k=config.FETCH_K):
+def retrieve(question, top_k=config.TOP_K, fetch_k=config.FETCH_K, doc_id=None):
+    extra = {"filter": {"doc_id": doc_id}} if doc_id else {}
     response = _client.query_vectors(
         vectorBucketName=config.VECTOR_BUCKET,
         indexName=config.VECTOR_INDEX,
@@ -40,6 +41,7 @@ def retrieve(question, top_k=config.TOP_K, fetch_k=config.FETCH_K):
         topK=fetch_k,
         returnMetadata=True,
         returnDistance=True,
+        **extra,
     )
     results = [
         {

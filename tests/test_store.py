@@ -46,3 +46,33 @@ def test_over_fetches_from_the_index(monkeypatch):
     fake = use_fake(monkeypatch)
     store.retrieve("question", top_k=3)
     assert fake.calls[0]["topK"] == store.config.FETCH_K
+    
+
+
+class FakeDeleteClient:
+    def __init__(self):
+        self.calls = []
+
+    def delete_vectors(self, **kwargs):
+        self.calls.append(kwargs)
+
+
+def test_delete_chunks_removes_the_keys_store_chunks_wrote(monkeypatch):
+    fake = FakeDeleteClient()
+    monkeypatch.setattr(store, "_client", fake)
+    store.delete_chunks("d1", 3)
+    assert fake.calls[0]["keys"] == ["d1-0", "d1-1", "d1-2"]
+
+
+def test_delete_chunks_works_in_batches(monkeypatch):
+    fake = FakeDeleteClient()
+    monkeypatch.setattr(store, "_client", fake)
+    store.delete_chunks("d1", 250)
+    assert [len(call["keys"]) for call in fake.calls] == [100, 100, 50]
+
+
+def test_delete_chunks_with_zero_count_does_nothing(monkeypatch):
+    fake = FakeDeleteClient()
+    monkeypatch.setattr(store, "_client", fake)
+    store.delete_chunks("d1", 0)
+    assert fake.calls == []

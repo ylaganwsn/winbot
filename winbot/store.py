@@ -53,3 +53,14 @@ def retrieve(question, top_k=config.TOP_K, fetch_k=config.FETCH_K, doc_id=None):
     ]
     results.sort(key=lambda m: m["similarity"], reverse=True)
     return results[:top_k]
+
+
+def delete_chunks(doc_id, count):
+    """Delete the vectors store_chunks wrote for a document (keys are <doc_id>-0 .. <doc_id>-N)."""
+    keys = [f"{doc_id}-{i}" for i in range(count)]
+    for start in range(0, len(keys), BATCH_SIZE):
+        _client.delete_vectors(
+            vectorBucketName=config.VECTOR_BUCKET,
+            indexName=config.VECTOR_INDEX,
+            keys=keys[start : start + BATCH_SIZE],
+        )

@@ -224,3 +224,9 @@ def test_messages_come_back_in_order(ready_document, answers):
 
 def test_messages_for_unknown_document_is_404(aws):
     assert client.get("/documents/nope/messages").status_code == 404
+    
+def test_message_timestamps_have_no_internal_suffix(ready_document, answers):
+    ask()
+    created_at = client.get("/documents/d1/messages").json()[0]["created_at"]
+    assert "#" not in created_at
+    assert created_at.startswith("20")

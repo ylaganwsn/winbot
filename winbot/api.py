@@ -142,4 +142,8 @@ def ask(doc_id: str, body: AskIn):
 def list_messages(doc_id: str):
     if db.get_document(doc_id) is None:
         raise HTTPException(status_code=404, detail="Document not found.")
-    return db.list_messages(doc_id)
+    messages = db.list_messages(doc_id)
+    for message in messages:
+        # the stored key ends in "#<random>"; clients only need the timestamp
+        message["created_at"] = message["created_at"].split("#")[0]
+    return messages

@@ -6,7 +6,7 @@ from pathlib import Path
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 
-from winbot import config, db, documents, storage
+from winbot import config, db, documents, storage, store
 from winbot.answer import answer as answer_question
 
 logger = logging.getLogger("uvicorn.error")
@@ -168,3 +168,24 @@ def get_file(doc_id: str):
         expires=FILE_LINK_SECONDS,
     )
     return {"url": url, "expires_in": FILE_LINK_SECONDS}
+
+@app.delete("/documents/{doc_id}", status_code=204)
+def delete_document(doc_id: str):
+    document = db.get_document(doc_id)
+    if document is None:
+        raise HTTPException(status_code=404, detail="Document not found.")
+    if document["status"] == "processing":
+        raise HTTPException(status_code=409, detail="Document is still processing.")
+
+    # The record goes last, so a failure part-way leaves it in the list
+    # and the delete can simply be tried again (every step is repeatable).
+    try:
+        store.delete_chunks(doc_id, document.get("chunks") or 0)
+        storage.delete_document_files(doc_id)
+        db.delete_messages(doc_id)
+        db.delete_document(doc_id)
+    except Exception:
+        logger.exception("Delete failed for document %s", doc_id)
+        raise HTTPException(
+            status_code=500, detail="Could not delete the document. Try again."
+        )

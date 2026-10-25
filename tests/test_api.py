@@ -247,3 +247,63 @@ def test_file_link_unknown_document_is_404(aws):
 def test_file_link_document_not_ready_is_409(aws):
     db.create_document("d1", "report.pdf")
     assert client.get("/documents/d1/file").status_code == 409
+    
+@pytest.fixture
+def deleted_vectors(monkeypatch):
+    calls = []
+    monkeypatch.setattr(api.store, "delete_chunks", lambda doc_id, count: calls.append((doc_id, count)))
+    return calls
+
+
+def test_delete_removes_everything_for_the_document(ready_document, answers, deleted_vectors, tmp_path):
+    source = tmp_path / "f.txt"
+    source.write_text("x")
+    api.storage.upload_file(source, "documents/d1/document.pdf")
+    api.storage.upload_file(source, "documents/other/document.pdf")
+    ask()
+    db.create_document("other", "other.pdf")
+
+    response = client.delete("/documents/d1")
+
+    assert response.status_code == 204
+    assert response.content == b""
+    assert deleted_vectors == [("d1", 5)]
+    assert db.get_document("d1") is None
+    assert db.list_messages("d1") == []
+    assert client.get("/documents/d1/file").status_code == 404
+    assert db.get_document("other") is not None
+    assert api.storage.delete_document_files("other") == 1
+
+
+def test_delete_unknown_document_is_404(aws, deleted_vectors):
+    assert client.delete("/documents/nope").status_code == 404
+    assert deleted_vectors == []
+
+
+def test_delete_document_still_processing_is_409(aws, deleted_vectors):
+    db.create_document("d1", "report.pdf")
+    assert client.delete("/documents/d1").status_code == 409
+    assert deleted_vectors == []
+    assert db.get_document("d1") is not None
+
+
+def test_delete_failed_document_works_without_chunk_count(aws, deleted_vectors):
+    db.create_document("d1", "report.pdf")
+    db.update_document("d1", status="failed", error="boom")
+    assert client.delete("/documents/d1").status_code == 204
+    assert deleted_vectors == [("d1", 0)]
+    assert db.get_document("d1") is None
+
+
+def test_delete_failure_keeps_the_record_so_it_can_be_retried(ready_document, monkeypatch, caplog):
+    def broken(doc_id, count):
+        raise RuntimeError("vector service down")
+
+    monkeypatch.setattr(api.store, "delete_chunks", broken)
+    with caplog.at_level("ERROR", logger="uvicorn.error"):
+        response = client.delete("/documents/d1")
+
+    assert response.status_code == 500
+    assert "vector service" not in response.text
+    assert "vector service down" in caplog.text
+    assert db.get_document("d1") is not None

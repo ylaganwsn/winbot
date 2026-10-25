@@ -6,7 +6,7 @@ from pathlib import Path
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 
-from winbot import config, db, documents
+from winbot import config, db, documents, storage
 from winbot.answer import answer as answer_question
 
 logger = logging.getLogger("uvicorn.error")
@@ -27,7 +27,10 @@ class DocumentOut(BaseModel):
 class HealthOut(BaseModel):
     status: str
 
-
+class FileOut(BaseModel):
+    url: str
+    expires_in: int
+    
 class AskIn(BaseModel):
     question: str = Field(min_length=1, max_length=1000)
 
@@ -147,3 +150,21 @@ def list_messages(doc_id: str):
         # the stored key ends in "#<random>"; clients only need the timestamp
         message["created_at"] = message["created_at"].split("#")[0]
     return messages
+
+FILE_LINK_SECONDS = 300
+
+
+@app.get("/documents/{doc_id}/file", response_model=FileOut)
+def get_file(doc_id: str):
+    document = db.get_document(doc_id)
+    if document is None:
+        raise HTTPException(status_code=404, detail="Document not found.")
+    if document["status"] != "ready":
+        raise HTTPException(status_code=409, detail="Document is not ready.")
+
+    url = storage.presigned_url(
+        storage.pdf_key(doc_id),
+        content_type="application/pdf",
+        expires=FILE_LINK_SECONDS,
+    )
+    return {"url": url, "expires_in": FILE_LINK_SECONDS}

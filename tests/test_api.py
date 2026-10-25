@@ -230,3 +230,20 @@ def test_message_timestamps_have_no_internal_suffix(ready_document, answers):
     created_at = client.get("/documents/d1/messages").json()[0]["created_at"]
     assert "#" not in created_at
     assert created_at.startswith("20")
+    
+def test_file_link_points_at_the_pdf(ready_document):
+    response = client.get("/documents/d1/file")
+    assert response.status_code == 200
+    body = response.json()
+    assert "documents/d1/document.pdf" in body["url"]
+    assert "response-content-type=application" in body["url"]
+    assert body["expires_in"] == 300
+
+
+def test_file_link_unknown_document_is_404(aws):
+    assert client.get("/documents/nope/file").status_code == 404
+
+
+def test_file_link_document_not_ready_is_409(aws):
+    db.create_document("d1", "report.pdf")
+    assert client.get("/documents/d1/file").status_code == 409

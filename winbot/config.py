@@ -22,6 +22,7 @@ FETCH_K = 10
 SIMILARITY_THRESHOLD = 0.15
 
 NOT_FOUND = "I couldn't find that in this document."
+MAX_UPLOAD_BYTES = 25 * 1024 * 1024
 
 
 def files_bucket():

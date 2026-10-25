@@ -14,6 +14,10 @@ class UnsupportedFileType(ValueError):
     pass
 
 
+class NoReadableText(ValueError):
+    pass
+
+
 def _cleanup(doc_id, chunk_count):
     """Undo whatever a failed upload stored. Never raises, so it can't hide the real error."""
     for undo in (
@@ -44,7 +48,7 @@ def process_upload(path, doc_id=None):
             pages = read_pdf(pdf)
 
         if not any(page["text"] for page in pages):
-            raise ValueError(
+            raise NoReadableText(
                 "No readable text found. Scanned documents are not supported yet."
             )
 

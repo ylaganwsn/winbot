@@ -1,3 +1,4 @@
+import logging
 import re
 import tempfile
 from pathlib import Path
@@ -6,6 +7,8 @@ from fastapi import FastAPI, File, HTTPException, UploadFile
 from pydantic import BaseModel
 
 from winbot import config, db, documents
+
+logger = logging.getLogger("uvicorn.error")
 
 app = FastAPI(title="Winbot")
 
@@ -67,6 +70,7 @@ def upload_document(file: UploadFile = File(...)):
         except documents.NoReadableText as error:
             raise HTTPException(status_code=422, detail=str(error))
         except Exception:
+            logger.exception("Upload failed for %s", filename)
             raise HTTPException(
                 status_code=500, detail="Processing failed. Try uploading again."
             )

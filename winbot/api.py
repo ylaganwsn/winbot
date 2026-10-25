@@ -4,9 +4,10 @@ import tempfile
 from pathlib import Path
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from winbot import config, db, documents
+from winbot.answer import answer as answer_question
 
 logger = logging.getLogger("uvicorn.error")
 
@@ -25,6 +26,24 @@ class DocumentOut(BaseModel):
 
 class HealthOut(BaseModel):
     status: str
+
+
+class AskIn(BaseModel):
+    question: str = Field(min_length=1, max_length=1000)
+
+
+class AnswerOut(BaseModel):
+    answer: str
+    pages: list[int]
+    provider: str
+
+
+class MessageOut(BaseModel):
+    created_at: str
+    question: str
+    answer: str
+    pages: list[int]
+    provider: str
 
 
 def _safe_filename(name):
@@ -87,3 +106,40 @@ def get_document(doc_id: str):
     if document is None:
         raise HTTPException(status_code=404, detail="Document not found.")
     return document
+
+
+@app.post("/documents/{doc_id}/ask", response_model=AnswerOut)
+def ask(doc_id: str, body: AskIn):
+    document = db.get_document(doc_id)
+    if document is None:
+        raise HTTPException(status_code=404, detail="Document not found.")
+    if document["status"] != "ready":
+        raise HTTPException(status_code=409, detail="Document is not ready.")
+
+    question = body.question.strip()
+    if not question:
+        raise HTTPException(status_code=422, detail="Question is empty.")
+
+    try:
+        result = answer_question(question, doc_id=doc_id)
+    except Exception:
+        logger.exception("Answering failed for document %s", doc_id)
+        raise HTTPException(
+            status_code=502, detail="Could not get an answer. Try again."
+        )
+
+    try:
+        db.add_message(
+            doc_id, question, result["answer"], result["pages"], result["provider"]
+        )
+    except Exception:
+        logger.exception("Could not save chat history for document %s", doc_id)
+
+    return result
+
+
+@app.get("/documents/{doc_id}/messages", response_model=list[MessageOut])
+def list_messages(doc_id: str):
+    if db.get_document(doc_id) is None:
+        raise HTTPException(status_code=404, detail="Document not found.")
+    return db.list_messages(doc_id)

@@ -126,3 +126,101 @@ def test_get_one_document(aws):
 
 def test_get_missing_document_is_404(aws):
     assert client.get("/documents/nope").status_code == 404
+    
+@pytest.fixture
+def ready_document(aws):
+    db.create_document("d1", "report.pdf")
+    db.update_document("d1", status="ready", pages=2, chunks=5)
+
+
+@pytest.fixture
+def answers(monkeypatch):
+    """Replace the real question answering with a fake that records its calls."""
+    calls = []
+
+    def fake(question, doc_id=None):
+        calls.append((question, doc_id))
+        return {"answer": "Amazon RDS", "pages": [1, 3], "provider": "gemini"}
+
+    monkeypatch.setattr(api, "answer_question", fake)
+    return calls
+
+
+def ask(doc_id="d1", question="Which service costs the most?"):
+    return client.post(f"/documents/{doc_id}/ask", json={"question": question})
+
+
+def test_ask_returns_the_answer_and_saves_it(ready_document, answers):
+    response = ask()
+    assert response.status_code == 200
+    assert response.json() == {"answer": "Amazon RDS", "pages": [1, 3], "provider": "gemini"}
+    assert answers == [("Which service costs the most?", "d1")]
+
+    saved = db.list_messages("d1")
+    assert len(saved) == 1
+    assert saved[0]["question"] == "Which service costs the most?"
+    assert saved[0]["pages"] == [1, 3]
+
+
+def test_ask_trims_the_question(ready_document, answers):
+    ask(question="  Which service costs the most?  ")
+    assert answers[0][0] == "Which service costs the most?"
+
+
+def test_ask_unknown_document_is_404(aws, answers):
+    assert ask("nope").status_code == 404
+    assert answers == []
+
+
+@pytest.mark.parametrize("status", ["processing", "failed"])
+def test_ask_document_that_is_not_ready_is_409(aws, answers, status):
+    db.create_document("d1", "report.pdf")
+    db.update_document("d1", status=status)
+    assert ask().status_code == 409
+    assert answers == []
+
+
+@pytest.mark.parametrize("question", ["", "   ", "x" * 1001])
+def test_bad_questions_are_422_and_never_answered(ready_document, answers, question):
+    assert ask(question=question).status_code == 422
+    assert answers == []
+
+
+def test_answer_failure_is_a_plain_502_and_nothing_is_saved(ready_document, monkeypatch, caplog):
+    def broken(question, doc_id=None):
+        raise RuntimeError("secret internal detail")
+
+    monkeypatch.setattr(api, "answer_question", broken)
+    with caplog.at_level("ERROR", logger="uvicorn.error"):
+        response = ask()
+
+    assert response.status_code == 502
+    assert "secret" not in response.text
+    assert "secret internal detail" in caplog.text
+    assert db.list_messages("d1") == []
+
+
+def test_history_save_failure_still_returns_the_answer(ready_document, answers, monkeypatch, caplog):
+    def broken(*args, **kwargs):
+        raise RuntimeError("table unavailable")
+
+    monkeypatch.setattr(api.db, "add_message", broken)
+    with caplog.at_level("ERROR", logger="uvicorn.error"):
+        response = ask()
+
+    assert response.status_code == 200
+    assert response.json()["answer"] == "Amazon RDS"
+    assert "table unavailable" in caplog.text
+
+
+def test_messages_come_back_in_order(ready_document, answers):
+    ask(question="first?")
+    ask(question="second?")
+    response = client.get("/documents/d1/messages")
+    assert response.status_code == 200
+    assert [m["question"] for m in response.json()] == ["first?", "second?"]
+    assert response.json()[0]["provider"] == "gemini"
+
+
+def test_messages_for_unknown_document_is_404(aws):
+    assert client.get("/documents/nope/messages").status_code == 404

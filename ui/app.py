@@ -1,5 +1,6 @@
 import os
 
+import pypdfium2 as pdfium
 import requests
 import streamlit as st
 
@@ -21,6 +22,26 @@ def load_documents():
     response = requests.get(f"{API_URL}/documents", timeout=10)
     response.raise_for_status()
     return response.json()
+
+
+@st.cache_data(max_entries=3, show_spinner=False)
+def pdf_bytes(doc_id):
+    """Download the document's PDF once and keep it for the next page views."""
+    link = requests.get(f"{API_URL}/documents/{doc_id}/file", timeout=10)
+    link.raise_for_status()
+    pdf = requests.get(link.json()["url"], timeout=60)
+    pdf.raise_for_status()
+    return pdf.content
+
+
+@st.cache_data(max_entries=40, show_spinner=False)
+def page_image(doc_id, page):
+    """One page of the PDF as a picture (page numbers start at 1)."""
+    pdf = pdfium.PdfDocument(pdf_bytes(doc_id))
+    try:
+        return pdf[page - 1].render(scale=2).to_pil()
+    finally:
+        pdf.close()
 
 
 def upload_document(uploaded):
@@ -84,3 +105,19 @@ if selected is None:
 document = next(d for d in ready if d["doc_id"] == selected)
 st.subheader(document["filename"])
 st.caption(f"{document['pages']} pages · ready to answer questions")
+
+page = st.number_input(
+    "Go to page",
+    min_value=1,
+    max_value=document["pages"],
+    value=1,
+    step=1,
+    key=f"page-{selected}",
+)
+
+try:
+    image = page_image(selected, page)
+except (requests.RequestException, pdfium.PdfiumError):
+    st.error("Could not load the document preview. Try again in a moment.")
+else:
+    st.image(image, width="stretch")

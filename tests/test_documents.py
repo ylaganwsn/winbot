@@ -121,3 +121,51 @@ def test_cleanup_errors_do_not_hide_the_original_error(aws, fakes, monkeypatch, 
 
     with pytest.raises(RuntimeError, match="original problem"):
         documents.process_upload(make_file(tmp_path, "report.pdf"), doc_id="d1")
+        
+OVERVIEW = {
+    "summary": "It is about costs.",
+    "faq": [{"question": "Which service costs most?", "answer": "RDS", "pages": [1]}],
+    "suggestions": ["What are the savings?"],
+}
+
+
+def test_overview_is_saved_with_the_document(aws, fakes, monkeypatch, tmp_path):
+    asked = []
+
+    def fake_overview(doc_id, pages):
+        asked.append((doc_id, pages, len(fakes["stored"])))
+        return OVERVIEW
+
+    monkeypatch.setattr(documents, "make_overview", fake_overview)
+    record = documents.process_upload(make_file(tmp_path, "report.pdf"), doc_id="d1")
+
+    assert record["summary"] == "It is about costs."
+    assert record["faq"] == OVERVIEW["faq"]
+    assert record["suggestions"] == ["What are the savings?"]
+    assert db.get_document("d1")["faq"][0]["pages"] == [1]
+    # it gets the document's pages, and only after the vectors are stored
+    assert asked == [("d1", PAGES, 1)]
+
+
+def test_a_failing_overview_does_not_fail_the_upload(aws, fakes, monkeypatch, tmp_path, caplog):
+    def broken(doc_id, pages):
+        raise RuntimeError("model down")
+
+    monkeypatch.setattr(documents, "make_overview", broken)
+    with caplog.at_level("ERROR", logger="uvicorn.error"):
+        record = documents.process_upload(make_file(tmp_path, "report.pdf"), doc_id="d1")
+
+    assert record["status"] == "ready"
+    assert "summary" not in record and "faq" not in record
+    assert "model down" in caplog.text
+    assert s3_keys() == ["documents/d1/document.pdf", "documents/d1/original/report.pdf"]
+
+
+def test_no_overview_is_requested_for_a_failed_upload(aws, fakes, monkeypatch, tmp_path):
+    called = []
+    monkeypatch.setattr(documents, "read_pdf", lambda path: [{"page": 1, "text": ""}])
+    monkeypatch.setattr(documents, "make_overview", lambda doc_id, pages: called.append(doc_id))
+
+    with pytest.raises(ValueError):
+        documents.process_upload(make_file(tmp_path, "scan.pdf"), doc_id="d1")
+    assert called == []

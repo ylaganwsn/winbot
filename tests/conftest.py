@@ -2,7 +2,7 @@ import boto3
 import pytest
 from moto import mock_aws
 
-from winbot import config
+from winbot import config, documents
 
 TEST_BUCKET = "test-winbot-files"
 
@@ -33,3 +33,13 @@ def aws(monkeypatch):
             BillingMode="PAY_PER_REQUEST",
         )
         yield
+
+
+@pytest.fixture(autouse=True)
+def no_real_overview(monkeypatch):
+    """No test may reach the real model. Tests that care replace this with their own fake."""
+    monkeypatch.setattr(
+        documents,
+        "make_overview",
+        lambda doc_id, pages: {"summary": "A test summary.", "faq": [], "suggestions": []},
+    )

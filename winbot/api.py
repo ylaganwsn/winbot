@@ -14,6 +14,12 @@ logger = logging.getLogger("uvicorn.error")
 app = FastAPI(title="Winbot")
 
 
+class FaqItem(BaseModel):
+    question: str
+    answer: str
+    pages: list[int]
+
+
 class DocumentOut(BaseModel):
     doc_id: str
     filename: str
@@ -22,6 +28,9 @@ class DocumentOut(BaseModel):
     pages: int | None = None
     chunks: int | None = None
     error: str | None = None
+    summary: str | None = None
+    faq: list[FaqItem] | None = None
+    suggestions: list[str] | None = None
 
 
 class HealthOut(BaseModel):

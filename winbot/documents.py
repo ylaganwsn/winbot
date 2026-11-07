@@ -1,13 +1,17 @@
+import logging
 import tempfile
 from pathlib import Path
 
 from winbot import db, storage
 from winbot.chunking import chunk_pages
 from winbot.convert import CONVERTIBLE, convert_to_pdf
+from winbot.overview import make_overview
 from winbot.reader import read_pdf
 from winbot.store import delete_chunks, store_chunks
 
 SUPPORTED = CONVERTIBLE | {".pdf"}
+
+logger = logging.getLogger("uvicorn.error")  # shows up in the API's own log
 
 
 class UnsupportedFileType(ValueError):
@@ -56,8 +60,19 @@ def process_upload(path, doc_id=None):
         chunk_count = len(chunks)
         store_chunks(doc_id, chunks)
 
+        overview = {}
+        try:
+            overview = make_overview(doc_id, pages)
+        except Exception:
+            # The upload is still good without a summary and FAQ.
+            logger.exception("Could not write the overview for %s", doc_id)
+
         return db.update_document(
-            doc_id, status="ready", pages=len(pages), chunks=chunk_count
+            doc_id,
+            status="ready",
+            pages=len(pages),
+            chunks=chunk_count,
+            **overview,
         )
     except Exception as error:
         _cleanup(doc_id, chunk_count)

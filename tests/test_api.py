@@ -307,3 +307,23 @@ def test_delete_failure_keeps_the_record_so_it_can_be_retried(ready_document, mo
     assert "vector service" not in response.text
     assert "vector service down" in caplog.text
     assert db.get_document("d1") is not None
+    
+def test_document_returns_its_summary_faq_and_suggestions(aws):
+    db.create_document("d1", "report.pdf")
+    db.update_document(
+        "d1",
+        status="ready",
+        summary="It is about costs.",
+        faq=[{"question": "Which costs most?", "answer": "RDS", "pages": [1, 3]}],
+        suggestions=["What are the savings?"],
+    )
+    body = client.get("/documents/d1").json()
+    assert body["summary"] == "It is about costs."
+    assert body["faq"] == [{"question": "Which costs most?", "answer": "RDS", "pages": [1, 3]}]
+    assert body["suggestions"] == ["What are the savings?"]
+    assert client.get("/documents").json()[0]["faq"][0]["answer"] == "RDS"
+
+
+def test_older_documents_without_an_overview_still_load(ready_document):
+    body = client.get("/documents/d1").json()
+    assert body["summary"] is None and body["faq"] is None and body["suggestions"] is None

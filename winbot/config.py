@@ -20,6 +20,9 @@ CHUNK_OVERLAP = 50
 TOP_K = 3
 FETCH_K = 10
 SIMILARITY_THRESHOLD = 0.15
+OVERVIEW_MAX_CHARS = 24000  # how much of the document the overview step reads
+FAQ_COUNT = 5  # questions answered ahead of time
+SUGGESTION_COUNT = 3  # extra questions, answered when clicked
 
 NOT_FOUND = "I couldn't find that in this document."
 MAX_UPLOAD_BYTES = 25 * 1024 * 1024

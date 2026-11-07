@@ -8,35 +8,35 @@ SYSTEM = (
 )
 
 
-def _gemini(prompt):
+def _gemini(prompt, system):
     from google import genai
 
     client = genai.Client()
     interaction = client.interactions.create(
         model=config.GEMINI_MODEL,
-        system_instruction=SYSTEM,
+        system_instruction=system,
         input=prompt,
     )
     return interaction.output_text.strip()
 
 
-def _groq(prompt):
+def _groq(prompt, system):
     from groq import Groq
 
     client = Groq()
     completion = client.chat.completions.create(
         model=config.GROQ_MODEL,
         messages=[
-            {"role": "system", "content": SYSTEM},
+            {"role": "system", "content": system},
             {"role": "user", "content": prompt},
         ],
     )
     return completion.choices[0].message.content.strip()
 
 
-def generate(prompt):
+def generate(prompt, system=SYSTEM):
     try:
-        return _gemini(prompt), "gemini"
+        return _gemini(prompt, system), "gemini"
     except Exception as error:
         print(f"[Gemini failed: {type(error).__name__}: {str(error)[:200]}. Trying Groq.]")
-        return _groq(prompt), "groq"
+        return _groq(prompt, system), "groq"

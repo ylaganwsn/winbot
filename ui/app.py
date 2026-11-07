@@ -70,6 +70,16 @@ def jump_to(doc_id, page):
     st.session_state[f"page-{doc_id}"] = page
 
 
+def open_faq(doc_id, index):
+    """Button callback: show this ready-made answer."""
+    st.session_state[f"faq-open-{doc_id}"] = index
+
+
+def ask_later(question):
+    """Button callback: ask this question when the page reruns."""
+    st.session_state["pending_question"] = question
+
+
 def show_answer(doc_id, tag, answer, pages, provider):
     st.markdown(answer)
     if pages:
@@ -174,6 +184,42 @@ with chat:
         history = []
         st.warning("Could not load the earlier chat. You can still ask a question.")
 
+    faq = document.get("faq") or []
+    suggestions = document.get("suggestions") or []
+    if document.get("summary"):
+        with st.expander("About this document", expanded=not history):
+            st.write(document["summary"])
+            if faq:
+                st.markdown("**Quick answers**")
+                for index, item in enumerate(faq):
+                    st.button(
+                        item["question"],
+                        key=f"faq-{selected}-{index}",
+                        on_click=open_faq,
+                        args=(selected, index),
+                        width="stretch",
+                    )
+                opened = st.session_state.get(f"faq-open-{selected}")
+                if opened is not None and opened < len(faq):
+                    with st.chat_message("assistant"):
+                        show_answer(
+                            selected,
+                            f"faq{opened}",
+                            faq[opened]["answer"],
+                            faq[opened]["pages"],
+                            "none",
+                        )
+            if suggestions:
+                st.markdown("**Try asking**")
+                for index, text in enumerate(suggestions):
+                    st.button(
+                        text,
+                        key=f"suggest-{selected}-{index}",
+                        on_click=ask_later,
+                        args=(text,),
+                        width="stretch",
+                    )
+
     messages = st.container(height=560)
     with messages:
         if not history:
@@ -190,7 +236,9 @@ with chat:
                     message["provider"],
                 )
 
-    question = st.chat_input("Ask a question about this document", max_chars=1000)
+    typed = st.chat_input("Ask a question about this document", max_chars=1000)
+    clicked = st.session_state.pop("pending_question", None)
+    question = typed or clicked
     if question:
         with messages:
             with st.chat_message("user"):

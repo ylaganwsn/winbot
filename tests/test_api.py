@@ -126,20 +126,31 @@ def test_get_one_document(aws):
 
 def test_get_missing_document_is_404(aws):
     assert client.get("/documents/nope").status_code == 404
-    
+
+
 @pytest.fixture
 def ready_document(aws):
     db.create_document("d1", "report.pdf")
     db.update_document("d1", status="ready", pages=2, chunks=5)
 
 
+class Calls(list):
+    """The (question, doc_id) of each call, plus the overview each one got."""
+
+    def __init__(self):
+        super().__init__()
+        self.overviews = []
+
+
 @pytest.fixture
 def answers(monkeypatch):
     """Replace the real question answering with a fake that records its calls."""
-    calls = []
+    calls = Calls()
+    overviews = calls.overviews
 
-    def fake(question, doc_id=None):
+    def fake(question, doc_id=None, overview=None):
         calls.append((question, doc_id))
+        overviews.append(overview)
         return {"answer": "Amazon RDS", "pages": [1, 3], "provider": "gemini"}
 
     monkeypatch.setattr(api, "answer_question", fake)
@@ -162,6 +173,59 @@ def test_ask_returns_the_answer_and_saves_it(ready_document, answers):
     assert saved[0]["pages"] == [1, 3]
 
 
+def test_ask_without_an_overview_passes_none(ready_document, answers):
+    ask()
+    assert answers.overviews == [None]
+
+
+def test_ask_passes_the_document_overview(ready_document, answers):
+    db.update_document(
+        "d1",
+        summary="It is about costs.",
+        faq=[{"question": "Which costs most?", "answer": "RDS", "pages": [1]}],
+        suggestions=["What are the savings?"],
+    )
+    ask()
+    assert answers.overviews == [
+        {
+            "summary": "It is about costs.",
+            "questions": ["Which costs most?", "What are the savings?"],
+        }
+    ]
+
+
+def test_a_quick_answer_question_is_answered_without_the_model(ready_document, answers):
+    db.update_document(
+        "d1",
+        summary="It is about costs.",
+        faq=[{"question": "Which costs most?", "answer": "RDS", "pages": [3]}],
+    )
+    response = ask(question="  WHICH costs   most  ")
+    assert response.json() == {"answer": "RDS", "pages": [3], "provider": "saved"}
+    assert answers == []
+    assert db.list_messages("d1")[0]["question"] == "WHICH costs   most"
+
+
+def test_a_repeated_question_reuses_the_earlier_answer(ready_document, answers):
+    ask(question="Which service costs the most?")
+    response = ask(question="which service costs the most")
+    assert response.json() == {"answer": "Amazon RDS", "pages": [1, 3], "provider": "saved"}
+    assert len(answers) == 1
+    assert len(db.list_messages("d1")) == 2
+
+
+def test_a_not_found_answer_is_never_reused(ready_document, monkeypatch):
+    calls = []
+
+    def fake(question, doc_id=None, overview=None):
+        calls.append(question)
+        return {"answer": config.NOT_FOUND, "pages": [], "provider": "gemini"}
+
+    monkeypatch.setattr(api, "answer_question", fake)
+    ask(question="Any bread?")
+    ask(question="any bread")
+    assert len(calls) == 2
+    
 def test_ask_trims_the_question(ready_document, answers):
     ask(question="  Which service costs the most?  ")
     assert answers[0][0] == "Which service costs the most?"
@@ -187,7 +251,7 @@ def test_bad_questions_are_422_and_never_answered(ready_document, answers, quest
 
 
 def test_answer_failure_is_a_plain_502_and_nothing_is_saved(ready_document, monkeypatch, caplog):
-    def broken(question, doc_id=None):
+    def broken(question, doc_id=None, overview=None):
         raise RuntimeError("secret internal detail")
 
     monkeypatch.setattr(api, "answer_question", broken)
@@ -224,13 +288,15 @@ def test_messages_come_back_in_order(ready_document, answers):
 
 def test_messages_for_unknown_document_is_404(aws):
     assert client.get("/documents/nope/messages").status_code == 404
-    
+
+
 def test_message_timestamps_have_no_internal_suffix(ready_document, answers):
     ask()
     created_at = client.get("/documents/d1/messages").json()[0]["created_at"]
     assert "#" not in created_at
     assert created_at.startswith("20")
-    
+
+
 def test_file_link_points_at_the_pdf(ready_document):
     response = client.get("/documents/d1/file")
     assert response.status_code == 200
@@ -247,7 +313,8 @@ def test_file_link_unknown_document_is_404(aws):
 def test_file_link_document_not_ready_is_409(aws):
     db.create_document("d1", "report.pdf")
     assert client.get("/documents/d1/file").status_code == 409
-    
+
+
 @pytest.fixture
 def deleted_vectors(monkeypatch):
     calls = []
@@ -307,7 +374,8 @@ def test_delete_failure_keeps_the_record_so_it_can_be_retried(ready_document, mo
     assert "vector service" not in response.text
     assert "vector service down" in caplog.text
     assert db.get_document("d1") is not None
-    
+
+
 def test_document_returns_its_summary_faq_and_suggestions(aws):
     db.create_document("d1", "report.pdf")
     db.update_document(

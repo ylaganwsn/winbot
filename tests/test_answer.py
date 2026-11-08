@@ -81,3 +81,57 @@ def test_doc_id_is_passed_to_retrieve(monkeypatch):
 
     answer_module.answer("question", doc_id="report")
     assert seen["doc_id"] == "report"
+
+
+OVERVIEW = {"summary": "A bakery's opening notes.", "questions": ["Who is the head baker?"]}
+
+
+def test_overview_lets_whole_document_questions_reach_the_llm(monkeypatch):
+    monkeypatch.setattr(
+        answer_module, "retrieve", lambda q, doc_id=None: fake_matches((0.04, 1))
+    )
+    seen = {}
+
+    def capture(prompt, system):
+        seen["prompt"], seen["system"] = prompt, system
+        return "These are a bakery's opening notes.", "gemini"
+
+    monkeypatch.setattr(answer_module, "generate", capture)
+
+    result = answer_module.answer("Summarize this document", overview=OVERVIEW)
+    assert result == {
+        "answer": "These are a bakery's opening notes.",
+        "pages": [],
+        "provider": "gemini",
+    }
+    assert "A bakery's opening notes." in seen["prompt"]
+    assert "- Who is the head baker?" in seen["prompt"]
+    assert "(none matched this question)" in seen["prompt"]
+    assert "text on page 1" not in seen["prompt"]
+    assert seen["system"] == answer_module.OVERVIEW_SYSTEM
+
+
+def test_overview_and_passages_are_sent_together(monkeypatch):
+    monkeypatch.setattr(
+        answer_module, "retrieve", lambda q, doc_id=None: fake_matches((0.30, 2))
+    )
+    seen = {}
+
+    def capture(prompt, system):
+        seen["prompt"] = prompt
+        return "Marisol Vega", "gemini"
+
+    monkeypatch.setattr(answer_module, "generate", capture)
+
+    result = answer_module.answer("Who is the head baker?", overview=OVERVIEW)
+    assert "[Page 2]" in seen["prompt"] and "Document overview" in seen["prompt"]
+    assert result["pages"] == [2]
+
+
+def test_overview_answer_can_still_be_not_found(monkeypatch):
+    monkeypatch.setattr(answer_module, "retrieve", lambda q, doc_id=None: [])
+    monkeypatch.setattr(
+        answer_module, "generate", lambda p, s: (config.NOT_FOUND, "groq")
+    )
+    result = answer_module.answer("What is the weather?", overview=OVERVIEW)
+    assert result == {"answer": config.NOT_FOUND, "pages": [], "provider": "groq"}

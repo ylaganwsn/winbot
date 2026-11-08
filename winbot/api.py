@@ -120,6 +120,31 @@ def get_document(doc_id: str):
     return document
 
 
+def _same_question(text):
+    """A question in a form where case, spacing and end punctuation don't matter."""
+    return " ".join(text.lower().split()).rstrip("?.! ")
+
+
+def _saved_answer(document, question):
+    """A stored answer to this same question, or None: Quick answers first,
+    then the newest earlier answer in this document's chat."""
+    wanted = _same_question(question)
+    for item in document.get("faq") or []:
+        if _same_question(item["question"]) == wanted:
+            return {"answer": item["answer"], "pages": item["pages"], "provider": "saved"}
+    for message in reversed(db.list_messages(document["doc_id"])):
+        if (
+            _same_question(message["question"]) == wanted
+            and message["answer"] != config.NOT_FOUND
+        ):
+            return {
+                "answer": message["answer"],
+                "pages": message["pages"],
+                "provider": "saved",
+            }
+    return None
+
+
 @app.post("/documents/{doc_id}/ask", response_model=AnswerOut)
 def ask(doc_id: str, body: AskIn):
     document = db.get_document(doc_id)
@@ -132,8 +157,24 @@ def ask(doc_id: str, body: AskIn):
     if not question:
         raise HTTPException(status_code=422, detail="Question is empty.")
 
+    result = _saved_answer(document, question)
+    if result is not None:
+        try:
+            db.add_message(doc_id, question, result["answer"], result["pages"], "saved")
+        except Exception:
+            logger.exception("Could not save chat history for document %s", doc_id)
+        return result
+
+    overview = None
+    if document.get("summary"):
+        overview = {
+            "summary": document["summary"],
+            "questions": [item["question"] for item in document.get("faq") or []]
+            + list(document.get("suggestions") or []),
+        }
+
     try:
-        result = answer_question(question, doc_id=doc_id)
+        result = answer_question(question, doc_id=doc_id, overview=overview)
     except Exception:
         logger.exception("Answering failed for document %s", doc_id)
         raise HTTPException(
